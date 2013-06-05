@@ -61,8 +61,8 @@
 const unsigned int window_width = 800;
 const unsigned int window_height = 800;
 
-const unsigned int mesh_width = 128;
-const unsigned int mesh_height = 128;
+const unsigned int mesh_width = 20;
+const unsigned int mesh_height = 20;
 
 // vbo variables
 GLuint vbo;
@@ -396,8 +396,8 @@ void prepare_vbo_kernel(float4 *pos, unsigned int width, unsigned int height, fl
 		v = v*4.0f - 2.0f;
 
 		// write output vertex
-		pos[index] = make_float4(u, v, 0.0, 1.0f);
-		speed[index] = make_float2((random(u)-1)*MAX_SPEED, (random(u)-1)*MAX_SPEED);
+		pos[index] = make_float4(u, v, 4*rand()/(float)RAND_MAX - 2, 1.0f);
+
 	}
 }
 
@@ -405,13 +405,6 @@ void prepare_kernel(float4 *pos, unsigned int mesh_width,
 		unsigned int mesh_height, float2 *speed)
 {
 	prepare_vbo_kernel(pos, mesh_width, mesh_height, speed);
-}
-
-void launch_kernel(float4 *pos, unsigned int mesh_width,
-		unsigned int mesh_height, float2 *speed)
-{
-	float4 mousePosition = make_float4((-2+4.0*mouse_old_x/800.0)*(translate_z/-3.0), (2-4.0*mouse_old_y/800.0)*(translate_z/-3.0), 0, 1);
-	simple_vbo_kernel(pos, mesh_width, mesh_height, mousePosition, speed);
 }
 
 int main(int argc, char **argv)
@@ -519,7 +512,7 @@ void runCuda()
 	                   4, /* no. features */
 	                   mesh_width * mesh_height, /* no. objects */
 	                   4, /* no. clusters */
-	                   0.5, /* % objects change membership */
+	                   0.1, /* % objects change membership */
 	                   membership, /* out: [numObjs] */
 	                   &loops);
 	printf("Loops: %d", loops);
@@ -552,6 +545,20 @@ bool runTest(int argc, char **argv, char *ref_file)
 	return true;
 }
 
+void setGLColor(int index)
+{
+	if (membership[index] == 0)
+		glColor3f( 1, 0, 0 );
+	if (membership[index] == 1)
+		glColor3f( 0, 1, 0 );
+	if (membership[index] == 2)
+		glColor3f( 0, 0, 1 );
+	if (membership[index] == 3)
+			glColor3f( 0, 1, 1 );
+	if (membership[index] == 4)
+			glColor3f( 1, 1, 0 );
+}
+
 void display()
 {
 	sdkStartTimer(&timer);
@@ -567,10 +574,11 @@ void display()
 	glRotatef(rotate_y, 0.0, 1.0, 0.0);
 
 	glBegin( GL_POINTS );
-	glColor3f( 0.95f, 0.207, 0.031f );
+	glPointSize(15);
 	for ( int i = 0; i < mesh_width*mesh_height; ++i )
 	{
-		glVertex3f( dptr[i].x, dptr[i].y, dptr[i].x + dptr[i].y );
+		setGLColor(i);
+		glVertex3f( dptr[i].x, dptr[i].y, dptr[i].z );
 	}
 	glEnd();
 	glFinish();
@@ -616,10 +624,13 @@ void mouse(int button, int state, int x, int y)
 void motion(int x, int y)
 {
 	float dy = y - mouse_old_y;
-	if (mouse_buttons & 4) {
-		//translate_z += dy * 0.01f;
-		rotate_x += dy * 0.1f;
-		//rotate_y -= dy * 0.1f;
+	float dx = x - mouse_old_y;
+	if (mouse_buttons & GLUT_LEFT_BUTTON) {
+		translate_z += dy * 0.01f;
+	} if (mouse_buttons & GLUT_MIDDLE_BUTTON) {
+		rotate_x += dx * 0.01f;
+	}  if (mouse_buttons & GLUT_RIGHT_BUTTON) {
+		rotate_y += dy * 0.01f;
 	}
 
 	mouse_old_x = x;

@@ -4,6 +4,8 @@ Release/
 data/
 .settings/
 
+*.*.orig
+
 # Object files
 *.o
 

@@ -176,20 +176,24 @@ void kmeans(float3 *objects, /* in: [numObjs] */
                    int numClusters, /* no. clusters */
                    float threshold, /* % objects change membership */
                    int *membership, /* out: [numObjs] */
-                   int *loop_iterations)
+                   int *loop_iterations, float3 *clusters)
 {
     int i, index, loop=0;
     int newClusterSize[numClusters];
     float delta; /* % of objects change their clusters */
-    float3 clusters[numClusters];
     float3 newClusters[numClusters];
 
     //printf("/* pick first numClusters elements of objects[] as initial cluster centers*/\n");
-    for (i=0; i<numClusters; i++)
-		clusters[i] = objects[i];
+    if (clusters == NULL) {
+    	clusters = new float3[numClusters];
+		for (i=0; i<numClusters; i++) {
+			clusters[i] = objects[i];
+			newClusters[i] = make_float3(0, 0, 0);
+		}
+    }
 
     //printf("/* initialize membership[] */\n");
-    for (i=0; i<numObjs; i++) membership[i] = -1;
+    //for (i=0; i<numObjs; i++) membership[i] = -1;
 
 	//printf("/* need to initialize newClusterSize and newClusters[0] to all 0 */\n");
     for (int i=0; i<numClusters; i++) {
@@ -290,6 +294,10 @@ void computeFPS()
 bool initGL(int *argc, char **argv)
 {
 	glutInit(argc, argv);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_COLOR_MATERIAL);
 	glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE);
 	glutInitWindowSize(window_width, window_height);
 	glutCreateWindow("K-Means");
@@ -332,11 +340,13 @@ void prepareCuda()
 int *membership = NULL;
 #define CLUSTER_COUNT 5
 #define OBJECTS_CLUSTER_CHANGE_THRESHOLD 0.1
+float3 *cl = NULL;
 void runKmeans()
 {
 	//launch_kernel(dptr, width, height, speed);
 	if (membership == NULL) {
 		membership = new int[MESH_SIZE];
+		for (int i=0;i<MESH_SIZE;i++) membership[i] = -1;
 	}
 
 	static double t;
@@ -350,7 +360,7 @@ void runKmeans()
 			   CLUSTER_COUNT,
 			   OBJECTS_CLUSTER_CHANGE_THRESHOLD, /* % objects change membership */
 			   membership, /* out: [numObjs] */
-			   &loops);
+			   &loops, cl);
 }
 
 bool runProgram(int argc, char **argv, char *ref_file)
@@ -415,7 +425,6 @@ void display()
 	for ( int i = 0; i < MESH_SIZE; ++i )
 	{
 		setGLColorForCluster(i);
-		glPointSize(5);
 		glVertex3f( dptr[i].x, dptr[i].y, dptr[i].z );
 	}
 	glEnd();

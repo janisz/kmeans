@@ -51,8 +51,8 @@
 const unsigned int window_width = 800;
 const unsigned int window_height = 800;
 
-const unsigned int width = 150;
-const unsigned int height = 150;
+const unsigned int width = 200;
+const unsigned int height = 200;
 
 // vbo variables
 GLuint vbo;
@@ -330,7 +330,8 @@ void prepareCuda()
 }
 
 int *membership = NULL;
-
+#define CLUSTER_COUNT 5
+#define OBJECTS_CLUSTER_CHANGE_THRESHOLD 0.1
 void runKmeans()
 {
 	//launch_kernel(dptr, width, height, speed);
@@ -346,8 +347,8 @@ void runKmeans()
 
 	kmeans(dptr, /* in: [numObjs][numCoords] */
 			   MESH_SIZE, /* no. objects */
-			   5, 	/* no. clusters */
-			   0.01, /* % objects change membership */
+			   CLUSTER_COUNT,
+			   OBJECTS_CLUSTER_CHANGE_THRESHOLD, /* % objects change membership */
 			   membership, /* out: [numObjs] */
 			   &loops);
 }

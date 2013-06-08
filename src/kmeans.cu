@@ -44,25 +44,15 @@
 #define THRESHOLD 0.30f
 #define REFRESH_DELAY 10 //ms
 
-#define DBG			(fprintf(stderr,"%s:%d:\t",__FILE__,__LINE__));
-
 ////////////////////////////////////////////////////////////////////////////////
-// constants
-#define MAX_DISTANCE 0.005
-#define MIN_DISTANCE 0.001
-#define MAX_ANGLE M_PI
-#define MAX_SPEED 0.09
-#define W_NEIGHBOUR_SPEED 0.15
-#define W_NEIGHBOUR_DISTANCE 0.15
-#define W_MIN_DISTANCE 0.15
-#define W_NOISE 0.1
-#define COMPARE(x, y) (((x) > (y)) - ((x) < (y)))
-#define SIGN(x) COMPARE(x, 0)
+
+#define MESH_SIZE (width*height)
+
 const unsigned int window_width = 800;
 const unsigned int window_height = 800;
 
-const unsigned int mesh_width = 100;
-const unsigned int mesh_height = 100;
+const unsigned int width = 150;
+const unsigned int height = 150;
 
 // vbo variables
 GLuint vbo;
@@ -95,7 +85,7 @@ char **pArgv = NULL;
 
 ////////////////////////////////////////////////////////////////////////////////
 // declaration, forward
-bool runTest(int argc, char **argv, char *ref_file);
+bool runProgram(int argc, char **argv, char *ref_file);
 void cleanup();
 
 // GL functionality
@@ -174,7 +164,7 @@ new cluster */
     float **clusters; /* out: [numClusters][numCoords] */
     float **newClusters; /* [numClusters][numCoords] */
 
-    printf("/* allocate a 2D space for returning variable clusters[] (coordinates of cluster centers) */\n");
+    //printf("/* allocate a 2D space for returning variable clusters[] (coordinates of cluster centers) */\n");
     clusters = (float**) malloc(numClusters * sizeof(float*));
     assert(clusters != NULL);
     clusters[0] = (float*) malloc(numClusters * numCoords * sizeof(float));
@@ -182,15 +172,15 @@ new cluster */
     for (i=1; i<numClusters; i++)
         clusters[i] = clusters[i-1] + numCoords;
 
-    printf("/* pick first numClusters elements of objects[] as initial cluster centers*/\n");
+    //printf("/* pick first numClusters elements of objects[] as initial cluster centers*/\n");
     for (i=0; i<numClusters; i++)
         for (j=0; j<numCoords; j++)
             clusters[i][j] = objects[i][j];
 
-    printf("/* initialize membership[] */\n");
+    //printf("/* initialize membership[] */\n");
     for (i=0; i<numObjs; i++) membership[i] = -1;
 
-	printf("/* need to initialize newClusterSize and newClusters[0] to all 0 */\n");
+	//printf("/* need to initialize newClusterSize and newClusters[0] to all 0 */\n");
     newClusterSize = (int*) calloc(numClusters, sizeof(int));
     assert(newClusterSize != NULL);
 
@@ -205,20 +195,17 @@ new cluster */
         delta = 0.0;
         for (i=0; i<numObjs; i++) {
 
-			printf("/* find the array index of nearest cluster center */\n");
+			//printf("/* find the array index of nearest cluster center */\n");
             index = find_nearest_cluster(numClusters, numCoords, objects[i],
                                          clusters);
 
-            DBG
-			printf("/* if membership changes, increase delta by 1 */\n");
+			//printf("/* if membership changes, increase delta by 1 */\n");
             if (membership[i] != index) delta += 1.0;
 
-            DBG
-			printf("/* assign the membership to object i */\n");
+			//printf("/* assign the membership to object i */\n");
             membership[i] = index;
 
-            DBG
-			printf("/* update new cluster centers : sum of objects located within */\n");
+			//printf("/* update new cluster centers : sum of objects located within */\n");
             newClusterSize[index]++;
             for (j=0; j<numCoords; j++)
                 newClusters[index][j] += objects[i][j];
@@ -248,42 +235,28 @@ new cluster */
 
 /*-----------------------------------------------------------------------------------------------------*/
 
-
-inline __device__ __host__ float random(float seed)
+float randFloat(float LO, float HI)
 {
-	int x = 88675123;
-	int y = 362436069;
-	int z = 521288629;
-
-	x = (y *((int) seed) + z) % x;
-
-	return sinf(x);
+	return LO + (float)rand()/((float)RAND_MAX/(HI-LO));
 }
 
-
-void prepare_vbo_kernel(float4 *pos, unsigned int width, unsigned int height, float2 *speed)
+void prepare_kernel(float4 *pos, float time)
 {
-	for (int index = 0;index<width*height;index++)	{
+	for (int index = 0;index<MESH_SIZE;index++)	{
 		// calculate uv coordinates
 		float u = (index / width) / (float) width;
 		float v = (index % width) / (float) height;
-	    u = u*2.0f - 1.0f;
-	    v = v*2.0f - 1.0f;
-
+	    u = u*2-1;
+	    v = v*2-1;
 	    // calculate simple sine wave pattern
 	    float freq = 4.0f;
-	    float w = sinf(u*freq) * cosf(v*freq);
+
+	    float w = sinf(u*freq+time) * sinf(v*freq+time);
 
 		// write output vertex
 		pos[index] = make_float4(u, v, w, 0);
 
 	}
-}
-
-void prepare_kernel(float4 *pos, unsigned int mesh_width,
-		unsigned int mesh_height, float2 *speed)
-{
-	prepare_vbo_kernel(pos, mesh_width, mesh_height, speed);
 }
 
 int main(int argc, char **argv)
@@ -293,14 +266,12 @@ int main(int argc, char **argv)
 	pArgc = &argc;
 	pArgv = argv;
 
-	speed = new float2[mesh_width*mesh_height];
-	dptr = new float4[mesh_width*mesh_height];
+	dptr = new float4[MESH_SIZE];
 
 	printf("starting...\n");
 
-	runTest(argc, argv, ref_file);
+	runProgram(argc, argv, ref_file);
 
-	cudaDeviceReset();
 	printf("completed, returned %s\n", (g_TotalErrors == 0) ? "OK" : "ERROR!");
 	exit(g_TotalErrors == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
 }
@@ -362,44 +333,42 @@ bool initGL(int *argc, char **argv)
 
 void prepareCuda()
 {
-	prepare_kernel(dptr, mesh_width, mesh_height, speed);
+	prepare_kernel(dptr, 0);
 }
 
 int *membership = NULL;
-
 float** obj = NULL;
 
-void runCuda()
+void runKmeans()
 {
-	//launch_kernel(dptr, mesh_width, mesh_height, speed);
-	if (membership != NULL) {
-		return;
+	//launch_kernel(dptr, width, height, speed);
+	if (membership == NULL) {
+		membership = new int[height*width];
 	}
 
-	membership = new int[mesh_height*mesh_width];
+	static double t;
+	t += 0.01;
+	prepare_kernel(dptr, t);
 
 	if (obj == NULL) {
-		obj = new float*[mesh_height*mesh_width];
-		for (int i=0;i<mesh_height*mesh_width;i++) {
-			//obj[i] = new float[4];
-				obj[i] = (float*)(&dptr[i]);
-		}
+		obj = new float*[height*width];
 	}
 
+	for (int i=0;i<height*width;i++) {
+		obj[i] = (float*)(&dptr[i]);
+	}
 	int loops;
 
-
 	seq_kmeans(obj, /* in: [numObjs][numCoords] */
-	                   4, /* no. features */
-	                   mesh_width * mesh_height, /* no. objects */
-	                   4, /* no. clusters */
-	                   0.1, /* % objects change membership */
-	                   membership, /* out: [numObjs] */
-	                   &loops);
-	printf("Loops: %d", loops);
+			   4, 	/* no. features */
+			   width * height, /* no. objects */
+			   3, 	/* no. clusters */
+			   0.01, /* % objects change membership */
+			   membership, /* out: [numObjs] */
+			   &loops);
 }
 
-bool runTest(int argc, char **argv, char *ref_file)
+bool runProgram(int argc, char **argv, char *ref_file)
 {
 	prepareCuda();
 	// Create the CUTIL timer
@@ -410,7 +379,6 @@ bool runTest(int argc, char **argv, char *ref_file)
 	if (false == initGL(&argc, argv)) {
 		return false;
 	}
-
 
 	// register callbacks
 	glutDisplayFunc(display);
@@ -426,14 +394,14 @@ bool runTest(int argc, char **argv, char *ref_file)
 	return true;
 }
 
-void setGLColor(int index)
+void setGLColorForCluster(int index)
 {
 	if (membership[index] == 0)
 		glColor3f( 1, 0, 0 );
 	if (membership[index] == 1)
 		glColor3f( 0, 1, 0 );
 	if (membership[index] == 2)
-		glColor3f( 0, 0, 1 );
+		glColor3f( 0, 0.5, 1 );
 	if (membership[index] == 3)
 			glColor3f( 0, 1, 1 );
 	if (membership[index] == 4)
@@ -444,7 +412,7 @@ void display()
 {
 	sdkStartTimer(&timer);
 
-	runCuda();
+	runKmeans();
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	// set view matrix
@@ -459,9 +427,10 @@ void display()
 
 
 	glBegin( GL_POINTS );
-	for ( int i = 0; i < mesh_width*mesh_height; ++i )
+	for ( int i = 0; i < MESH_SIZE; ++i )
 	{
-		setGLColor(i);
+		setGLColorForCluster(i);
+		glPointSize(5);
 		glVertex3f( dptr[i].x, dptr[i].y, dptr[i].z );
 	}
 	glEnd();

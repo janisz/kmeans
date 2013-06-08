@@ -61,8 +61,8 @@
 const unsigned int window_width = 800;
 const unsigned int window_height = 800;
 
-const unsigned int mesh_width = 20;
-const unsigned int mesh_height = 20;
+const unsigned int mesh_width = 100;
+const unsigned int mesh_height = 100;
 
 // vbo variables
 GLuint vbo;
@@ -76,7 +76,7 @@ float4 *dptr = NULL;
 // mouse controls
 int mouse_old_x, mouse_old_y;
 int mouse_buttons = 0;
-float rotate_x = -3.0, rotate_y = 3.0;
+float rotate_x = 0.0, rotate_y = 0.0;
 float translate_z = -3.0;
 
 StopWatchInterface *timer = NULL;
@@ -272,7 +272,7 @@ void prepare_vbo_kernel(float4 *pos, unsigned int width, unsigned int height, fl
 
 	    // calculate simple sine wave pattern
 	    float freq = 4.0f;
-	    float w = sinf(u*freq) * cosf(v*freq) * 0.5f;
+	    float w = sinf(u*freq) * cosf(v*freq);
 
 		// write output vertex
 		pos[index] = make_float4(u, v, w, 0);
@@ -372,9 +372,11 @@ float** obj = NULL;
 void runCuda()
 {
 	//launch_kernel(dptr, mesh_width, mesh_height, speed);
-	if (membership == NULL) {
-		membership = new int[mesh_height*mesh_width];
+	if (membership != NULL) {
+		return;
 	}
+
+	membership = new int[mesh_height*mesh_width];
 
 	if (obj == NULL) {
 		obj = new float*[mesh_height*mesh_width];
@@ -452,8 +454,11 @@ void display()
 	glRotatef(rotate_x, 1.0, 0.0, 0.0);
 	glRotatef(rotate_y, 0.0, 0.0, 1.0);
 
+	glColor3f( 1, 1, 1 );
+	glutWireCube (2.0);
+
+
 	glBegin( GL_POINTS );
-	glPointSize(15);
 	for ( int i = 0; i < mesh_width*mesh_height; ++i )
 	{
 		setGLColor(i);

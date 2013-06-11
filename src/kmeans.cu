@@ -148,7 +148,7 @@ float euclidDistance(const float3 coord1, const float3 coord2)
 
 /*----< find_nearest_cluster() >---------------------------------------------*/
 __golobal__
-void findNearestCluster( int numClusters, 	/* no. clusters */
+void findNearestClusterAndUpdateMembership( int numClusters, 	/* no. clusters */
 						 int numObjs, 		/* no. objects */
                          float3 *objects, 	/* [numClusters] */
                          float3 *clusters, 	/* [numClusters] */
@@ -175,6 +175,29 @@ void findNearestCluster( int numClusters, 	/* no. clusters */
     }
 }
 
+__golobal__
+void calculateNewClustersPositions( int numClusters, 	/* no. clusters */
+									int numObjs, 		/* no. objects */
+									float3 *objects, 	/* [numClusters] */
+									float3 *clusters, 	/* [numClusters] */
+									int *membership, 	/* [numObjs] */
+								 )
+{
+    int clusterId = blockDim.x * blockIdx.x + threadIdx.x;
+    if (clusterId < numClusters) {
+    	float3 position = make_float3(0, 0, 0);
+    	int objectsInCLuster = 0;
+		for (int i=0; i<numObjs; i++) {
+			if (membership[i] == clusterId) {
+				position += objects[i];
+				objectsInCLuster++;
+			}
+		}
+		position /= objectsInCLuster;
+		clusters[clusterId] = position;
+    }
+}
+
 /*----< seq_kmeans() >-------------------------------------------------------*/
 /* return an array of cluster centers of size [numClusters][numCoords] */
 void kmeans(float3 *objects, /* in: [numObjs] */
@@ -188,7 +211,6 @@ void kmeans(float3 *objects, /* in: [numObjs] */
     int newClusterSize[numClusters];
     float delta; /* % of objects change their clusters */
     float3 clusters[numClusters];
-    float3 newClusters[numClusters];
 
     //printf("/* pick first numClusters elements of objects[] as initial cluster centers*/\n");
     for (i=0; i<numClusters; i++)

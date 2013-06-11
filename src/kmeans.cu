@@ -90,17 +90,6 @@ inline void __cudaCheckError( const char *file, const int line )
     return;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-#define MESH_SIZE (width*height)
-
-const unsigned int window_width = 800;
-const unsigned int window_height = 800;
-
-const unsigned int width  = 256;
-const unsigned int height = 256;
-
-
 float3 *dptr = NULL;
 
 // mouse controls
@@ -146,6 +135,26 @@ void runCuda(struct cudaGraphicsResource **vbo_resource);
 void prepareCuda(struct cudaGraphicsResource **vbo_resource);
 void checkResultCuda(int argc, char **argv, const GLuint &vbo);
 
+////////////////////////////////////////////////////////////////////////////////
+#define MESH_SIZE (width*height)
+
+const unsigned int window_width = 800;
+const unsigned int window_height = 800;
+
+const unsigned int width  = 256;
+const unsigned int height = 256;
+
+float3 *deviceObjects;
+float3 *deviceClusters;
+int *deviceMembership;
+int *membership = NULL;
+int *numberOfPointsThatChangeCluster;
+#define CLUSTER_COUNT 5
+#define OBJECTS_CLUSTER_CHANGE_THRESHOLD 0.1
+////////////////////////////////////////////////////////////////////////////////
+
+
+
 /*-----------------------------------------------------------------------------------------------------*/
 
 inline __host__ __device__ float3 operator+(const float3 &a, const float3 &b)
@@ -164,34 +173,17 @@ inline __host__ __device__ float dot(float3 a, float3 b)
 {
 	return a.x*b.x + a.y*b.y + a.z*b.z;
 }
-inline __host__ __device__ float distance(float3 pt1, float3 pt2)
+inline __host__ __device__ float sqDistance(float3 pt1, float3 pt2)
 {
 	float3 v = pt2 - pt1;
-	return sqrt(dot(v,v));
+	return (dot(v,v));
 }
 
 
-/*-----------------------------------------------------------------------------------------------------*/
-
-__host__ __device__ inline
-float euclidDistance(const float3 coord1, const float3 coord2)
-{
-    float ans=0.0;
-
-    ans += (coord1.x-coord2.x) * (coord1.x - coord2.x);
-    ans += (coord1.y-coord2.y) * (coord1.y - coord2.y);
-    ans += (coord1.z-coord2.z) * (coord1.z - coord2.z);
-
-    return ans;
-}
-
-/*----< find_nearest_cluster() >---------------------------------------------*/
 __global__
-void findNearestClusterAndUpdateMembership(const int numClusters, 	/* no. clusters */
-											 int numObjs, 		/* no. objects */
-											 float3 *objects, 	/* [numClusters] */
-											 float3 *clustersPositions, 	/* [numClusters] */
-											 int *membership, 	/* [numObjs] */
+void findNearestClusterAndUpdateMembership(  float3 *objects,
+											 float3 *clustersPositions,
+											 int *membership,
 											 int *delta
 										 )
 {
@@ -200,23 +192,23 @@ void findNearestClusterAndUpdateMembership(const int numClusters, 	/* no. cluste
 	unsigned int objectId = y*width+x;
 
 	extern __shared__ float3 clusters[];
-	if (threadIdx.x < numClusters)
+	if (threadIdx.x < CLUSTER_COUNT)
 	{
 		clusters[threadIdx.x] = clustersPositions[threadIdx.x];
 	}
 	__syncthreads();
 
-    if (objectId < numObjs) {
+    if (objectId < MESH_SIZE) {
     	int index = 0;
 		float dist, min_dist;
 		float3 position = objects[objectId];
 
-		/* find the cluster id that has min distance to object */
-		min_dist = euclidDistance(position, clusters[0]);
+		/* find the cluster id that has min sqDistance to object */
+		min_dist = sqDistance(position, clusters[0]);
 
-		for (int i=1; i<numClusters; i++) {
-			dist = euclidDistance(position, clusters[i]);
-			/* no need square root */
+		for (int i=1; i<CLUSTER_COUNT; i++) {
+			dist = sqDistance(position, clusters[i]);
+
 			if (dist < min_dist) { /* find the min and its array index */
 				min_dist = dist;
 				index = i;
@@ -230,9 +222,7 @@ void findNearestClusterAndUpdateMembership(const int numClusters, 	/* no. cluste
 }
 
 __global__
-void calculateNewClustersPositions( int numClusters, 	/* no. clusters */
-									int numObjs, 		/* no. objects */
-									float3 *objects, 	/* [numClusters] */
+void calculateNewClustersPositions( float3 *objects, 	/* [numClusters] */
 									float3 *clusters, 	/* [numClusters] */
 									int *membership 	/* [numObjs] */
 								 )
@@ -241,11 +231,11 @@ void calculateNewClustersPositions( int numClusters, 	/* no. clusters */
 	unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
 	unsigned int clusterId = y*width+x;
 
-	if (clusterId < numClusters) {
+	if (clusterId < CLUSTER_COUNT) {
     	float3 position = make_float3(0, 0, 0);
     	int objectsInCluster = 0;
 
-		for (int i=0; i<numObjs; i++) {
+		for (int i=0; i<MESH_SIZE; i++) {
 			if (membership[i] == clusterId) {
 				position = position + objects[i];
 				objectsInCluster++;
@@ -260,21 +250,7 @@ void calculateNewClustersPositions( int numClusters, 	/* no. clusters */
     }
 }
 
-float3 *deviceObjects;
-float3 *deviceClusters;
-int *deviceMembership;
-int *membership = NULL;
-int *numberOfPointsThatChangeCluster;
-#define CLUSTER_COUNT 5
-#define OBJECTS_CLUSTER_CHANGE_THRESHOLD 0.1
-/*----< seq_kmeans() >-------------------------------------------------------*/
-/* return an array of cluster centers of size [numClusters][numCoords] */
-void kmeans(float3 *objects, /* in: [numObjs] */
-                   int numObjs, /* no. objects */
-                   int numClusters, /* no. clusters */
-                   float threshold, /* % objects change membership */
-                   int *membership, /* out: [numObjs] */
-                   int *loop_iterations)
+void kmeans(int *membership, int *loop_iterations)
 {
 	static int initialized;
     int loop=0;
@@ -282,9 +258,9 @@ void kmeans(float3 *objects, /* in: [numObjs] */
     if (!initialized) {
         //printf("/* pick first numClusters elements of objects[] as initial cluster centers*/\n");
     	float3 clusters[CLUSTER_COUNT];
-    	for (int i=0;i<CLUSTER_COUNT;i++) clusters[i] = objects[i];
+    	for (int i=0;i<CLUSTER_COUNT;i++) clusters[i] = dptr[i];
         //printf("/* initialize membership[] */\n");
-        for (int i=0; i<numObjs; i++) membership[i] = -1;
+        for (int i=0; i<MESH_SIZE; i++) membership[i] = -1;
         CudaSafeCall( cudaMallocHost(&numberOfPointsThatChangeCluster, sizeof(int)));
     	CudaSafeCall( cudaMalloc(&deviceClusters, CLUSTER_COUNT*sizeof(float3)));
     	CudaSafeCall( cudaMemcpy(deviceClusters, clusters, CLUSTER_COUNT*sizeof(float3), cudaMemcpyHostToDevice));
@@ -301,15 +277,15 @@ void kmeans(float3 *objects, /* in: [numObjs] */
         *numberOfPointsThatChangeCluster = 0;
 
         findNearestClusterAndUpdateMembership
-        	<<< grid, block, numClusters*sizeof(float3) >>>
-        	(numClusters, numObjs, objects, deviceClusters, membership, numberOfPointsThatChangeCluster);
+        	<<< grid, block, CLUSTER_COUNT*sizeof(float3) >>>
+        	(dptr, deviceClusters, membership, numberOfPointsThatChangeCluster);
         CudaCheckError();
         calculateNewClustersPositions
         	<<< grid, block >>>
-        	(numClusters, numObjs, objects, deviceClusters, membership);
+        	(dptr, deviceClusters, membership);
         CudaCheckError();
 
-    } while (*numberOfPointsThatChangeCluster/(float)numObjs > threshold && loop++ < 500);
+    } while (*numberOfPointsThatChangeCluster/(float)MESH_SIZE > OBJECTS_CLUSTER_CHANGE_THRESHOLD && loop++ < 500);
 
 
     *loop_iterations = loop + 1;
@@ -322,7 +298,7 @@ float randFloat(float LO, float HI)
 	return LO + (float)rand()/((float)RAND_MAX/(HI-LO));
 }
 
-void prepare_positions(float3 *pos, float time)
+void prepare_positions(float time)
 {
 	for (int index = 0;index<MESH_SIZE;index++)	{
 
@@ -337,7 +313,7 @@ void prepare_positions(float3 *pos, float time)
 	    //float w = sinf(u*freq+time) * sinf(v*freq+time);
 	    float w = sinf(freq*sqrtf(u*u + v*v)+time);
 	    //float w = (u*u-v*v) * sinf(u+time);
-		pos[index] = make_float3(u, v, w);
+		dptr[index] = make_float3(u, v, w);
 	}
 }
 
@@ -415,7 +391,7 @@ bool initGL(int *argc, char **argv)
 
 void prepareCuda()
 {
-	prepare_positions(dptr, 0);
+	prepare_positions(0);
 }
 
 
@@ -428,16 +404,11 @@ void runKmeans()
 
 	static double t;
 	t += 0.01;
-	prepare_positions(dptr, t);
+	prepare_positions(t);
 
 	int loops;
 
-	kmeans(dptr, /* in: [numObjs][numCoords] */
-			   MESH_SIZE, /* no. objects */
-			   CLUSTER_COUNT,
-			   OBJECTS_CLUSTER_CHANGE_THRESHOLD, /* % objects change membership */
-			   membership, /* out: [numObjs] */
-			   &loops);
+	kmeans(membership, &loops);
 }
 
 bool runProgram(int argc, char **argv, char *ref_file)
@@ -478,6 +449,8 @@ void setGLColorForCluster(int index)
 			glColor3f( 0, 1, 1 );
 	if (membership[index] == 4)
 			glColor3f( 1, 1, 0 );
+	if (membership[index] == 5)
+			glColor3f( 0.5, 1, 0 );
 }
 
 void display()

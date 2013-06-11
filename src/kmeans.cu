@@ -149,6 +149,7 @@ float3 *deviceClusters;
 int *deviceMembership;
 int *membership = NULL;
 int *numberOfPointsThatChangeCluster;
+int *deviceNewClusterSize;
 #define CLUSTER_COUNT 5
 #define OBJECTS_CLUSTER_CHANGE_THRESHOLD 0.1
 ////////////////////////////////////////////////////////////////////////////////
@@ -184,7 +185,8 @@ __global__
 void findNearestClusterAndUpdateMembership(  float3 *objects,
 											 float3 *clustersPositions,
 											 int *membership,
-											 int *delta
+											 int *delta,
+											 int *newClusterSize
 										 )
 {
 	unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
@@ -214,17 +216,89 @@ void findNearestClusterAndUpdateMembership(  float3 *objects,
 				index = i;
 			}
 		}
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
 
 
 		membership[objectId] = index;
+    }
+=======
+=======
+>>>>>>> Stashed changes
+		if (membership[objectId] != index) {
+			membership[objectId] = index;
+			atomicAdd(changedClusters, 1);
+		}
+
+		atomicAdd(&clusterSize[index], 1);
+		atomicAdd(&(newClusters[index].x), position.x);
+		atomicAdd(&(newClusters[index].y), position.y);
+		atomicAdd(&(newClusters[index].z), position.z);
+
+    }
+
+    __syncthreads();
+
+    if (objectId == 0)
+    {
+    	for (int i=0;i<CLUSTER_COUNT;i++) {
+    		clustersPositions[i] = make_float3(0, 0, 0);
+<<<<<<< Updated upstream
+		}
+    }
+
+    __syncthreads();
+>>>>>>> Stashed changes
+
+    if ( threadIdx.x == 0 && threadIdx.y == 0)
+    {
+    	for (int i=0;i<CLUSTER_COUNT;i++) {
+    		atomicAdd(&newClusterSize[i], clusterSize[i]);
+
+			atomicAdd(&(clustersPositions[i].x), newClusters[i].x);
+			atomicAdd(&(clustersPositions[i].y), newClusters[i].y);
+			atomicAdd(&(clustersPositions[i].z), newClusters[i].z);
+=======
+>>>>>>> Stashed changes
+		}
+
+    	atomicAdd(delta, changedClusters[0]);
+    }
+
+    __syncthreads();
+
+<<<<<<< Updated upstream
+=======
+    if ( threadIdx.x == 0 && threadIdx.y == 0)
+    {
+    	for (int i=0;i<CLUSTER_COUNT;i++) {
+    		atomicAdd(&newClusterSize[i], clusterSize[i]);
+
+			atomicAdd(&(clustersPositions[i].x), newClusters[i].x);
+			atomicAdd(&(clustersPositions[i].y), newClusters[i].y);
+			atomicAdd(&(clustersPositions[i].z), newClusters[i].z);
+		}
+
+    	atomicAdd(delta, changedClusters[0]);
+    }
+
+    __syncthreads();
+
+>>>>>>> Stashed changes
+    if (objectId == 0)
+    {
+    	for (int i=0;i<CLUSTER_COUNT;i++) {
+    		if (newClusterSize[i] != 0)
+    			clustersPositions[i] = clustersPositions[i] / newClusterSize[i];
+		}
     }
 
 }
 
 __global__
-void calculateNewClustersPositions( float3 *objects, 	/* [numClusters] */
-									float3 *clusters, 	/* [numClusters] */
-									int *membership 	/* [numObjs] */
+void calculateNewClustersPositions( float3 *objects,
+									float3 *clusters,
+									int *membership
 								 )
 {
 	unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
@@ -246,7 +320,7 @@ void calculateNewClustersPositions( float3 *objects, 	/* [numClusters] */
 			position = position / objectsInCluster;
 		}
 
-		clusters[clusterId] = position;
+//		clusters[clusterId] = position;
     }
 }
 
@@ -254,15 +328,17 @@ void kmeans(int *membership, int *loop_iterations)
 {
 	static int initialized;
     int loop=0;
-    if (initialized > 100) exit(0);
+    float3 clusters[CLUSTER_COUNT];
+//    if (initialized > 100) exit(0);
     if (!initialized) {
         //printf("/* pick first numClusters elements of objects[] as initial cluster centers*/\n");
-    	float3 clusters[CLUSTER_COUNT];
+
     	for (int i=0;i<CLUSTER_COUNT;i++) clusters[i] = dptr[i];
         //printf("/* initialize membership[] */\n");
         for (int i=0; i<MESH_SIZE; i++) membership[i] = -1;
         CudaSafeCall( cudaMallocHost(&numberOfPointsThatChangeCluster, sizeof(int)));
     	CudaSafeCall( cudaMalloc(&deviceClusters, CLUSTER_COUNT*sizeof(float3)));
+    	CudaSafeCall( cudaMalloc(&deviceNewClusterSize, CLUSTER_COUNT*sizeof(int)));
     	CudaSafeCall( cudaMemcpy(deviceClusters, clusters, CLUSTER_COUNT*sizeof(float3), cudaMemcpyHostToDevice));
 
 		printf("Initialized:\n");
@@ -277,8 +353,18 @@ void kmeans(int *membership, int *loop_iterations)
         *numberOfPointsThatChangeCluster = 0;
 
         findNearestClusterAndUpdateMembership
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
         	<<< grid, block, CLUSTER_COUNT*sizeof(float3) >>>
         	(dptr, deviceClusters, membership, numberOfPointsThatChangeCluster);
+=======
+        	<<< grid, block >>>
+        	(dptr, deviceClusters, membership, numberOfPointsThatChangeCluster, deviceNewClusterSize);
+>>>>>>> Stashed changes
+=======
+        	<<< grid, block >>>
+        	(dptr, deviceClusters, membership, numberOfPointsThatChangeCluster, deviceNewClusterSize);
+>>>>>>> Stashed changes
         CudaCheckError();
         calculateNewClustersPositions
         	<<< grid, block >>>
@@ -287,6 +373,10 @@ void kmeans(int *membership, int *loop_iterations)
 
     } while (*numberOfPointsThatChangeCluster/(float)MESH_SIZE > OBJECTS_CLUSTER_CHANGE_THRESHOLD && loop++ < 500);
 
+    CudaSafeCall( cudaMemcpy(clusters, deviceClusters, CLUSTER_COUNT*sizeof(float3), cudaMemcpyDeviceToHost));
+    printf("\n");
+    for (int i=0;i<CLUSTER_COUNT;i++)
+    	printf("%f\t%f\%f\n", clusters[i].x, clusters[i].y, clusters[i].z);
 
     *loop_iterations = loop + 1;
 }

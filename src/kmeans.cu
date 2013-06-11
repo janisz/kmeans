@@ -147,13 +147,13 @@ float euclidDistance(const float3 coord1, const float3 coord2)
 }
 
 /*----< find_nearest_cluster() >---------------------------------------------*/
-__golobal__
+__global__
 void findNearestClusterAndUpdateMembership( int numClusters, 	/* no. clusters */
-						 int numObjs, 		/* no. objects */
-                         float3 *objects, 	/* [numClusters] */
-                         float3 *clusters, 	/* [numClusters] */
-                         int *membership, 	/* [numObjs] */
-					 )
+											 int numObjs, 		/* no. objects */
+											 float3 *objects, 	/* [numClusters] */
+											 float3 *clusters, 	/* [numClusters] */
+											 int *membership 	/* [numObjs] */
+										 )
 {
     int objectId = blockDim.x * blockIdx.x + threadIdx.x;
     if (objectId < numObjs) {
@@ -161,7 +161,7 @@ void findNearestClusterAndUpdateMembership( int numClusters, 	/* no. clusters */
 		float dist, min_dist;
 
 		/* find the cluster id that has min distance to object */
-		min_dist = euclidDistance(object, clusters[0]);
+		min_dist = euclidDistance(objects[objectId], clusters[0]);
 
 		for (int i=1; i<numClusters; i++) {
 			dist = euclidDistance(objects[objectId], clusters[i]);
@@ -175,12 +175,12 @@ void findNearestClusterAndUpdateMembership( int numClusters, 	/* no. clusters */
     }
 }
 
-__golobal__
+__global__
 void calculateNewClustersPositions( int numClusters, 	/* no. clusters */
 									int numObjs, 		/* no. objects */
 									float3 *objects, 	/* [numClusters] */
 									float3 *clusters, 	/* [numClusters] */
-									int *membership, 	/* [numObjs] */
+									int *membership 	/* [numObjs] */
 								 )
 {
     int clusterId = blockDim.x * blockIdx.x + threadIdx.x;
@@ -189,11 +189,13 @@ void calculateNewClustersPositions( int numClusters, 	/* no. clusters */
     	int objectsInCLuster = 0;
 		for (int i=0; i<numObjs; i++) {
 			if (membership[i] == clusterId) {
-				position += objects[i];
+				position = position + objects[i];
 				objectsInCLuster++;
 			}
 		}
-		position /= objectsInCLuster;
+		if (objectsInCLuster) {
+			position = position / objectsInCLuster;
+		}
 		clusters[clusterId] = position;
     }
 }
@@ -207,8 +209,7 @@ void kmeans(float3 *objects, /* in: [numObjs] */
                    int *membership, /* out: [numObjs] */
                    int *loop_iterations)
 {
-    int i, index, loop=0;
-    int newClusterSize[numClusters];
+    int i, loop=0;
     float delta; /* % of objects change their clusters */
     float3 clusters[numClusters];
 
@@ -219,36 +220,17 @@ void kmeans(float3 *objects, /* in: [numObjs] */
     //printf("/* initialize membership[] */\n");
     for (i=0; i<numObjs; i++) membership[i] = -1;
 
-	//printf("/* need to initialize newClusterSize and newClusters[0] to all 0 */\n");
-    for (int i=0; i<numClusters; i++) {
-    	newClusterSize[i] = 0;
-    }
+    float3 *deviceObjects;
+    float3 *deviceClusters;
+    int *deviceMembership;
+
+    cudaMalloc(&deviceObjects, numObjs*sizeof(float3));
+	cudaMalloc(&deviceClusters, numClusters*sizeof(float3));
+	cudaMalloc(&deviceMembership, numObjs*sizeof(int));
 
     do {
         delta = 0.0;
-        for (i=0; i<numObjs; i++) {
 
-			//printf("/* find the array index of nearest cluster center */\n");
-            index = findNearestCluster(numClusters, objects[i], clusters);
-
-			//printf("/* if membership changes, increase delta by 1 */\n");
-            if (membership[i] != index) delta += 1.0;
-
-			//printf("/* assign the membership to object i */\n");
-            membership[i] = index;
-
-			//printf("/* update new cluster centers : sum of objects located within */\n");
-            newClusterSize[index]++;
-			newClusters[index] = newClusters[index] + objects[i];
-        }
-
-        /* average the sum and replace old cluster centers with newClusters */
-        for (i=0; i<numClusters; i++) {
-			if (newClusterSize[i] > 0)
-				clusters[i] = newClusters[i] / newClusterSize[i];
-			newClusters[i] = make_float3(0, 0, 0);
-            newClusterSize[i] = 0; /* set back to 0 */
-        }
 
         delta /= numObjs;
     } while (delta > threshold && loop++ < 500);

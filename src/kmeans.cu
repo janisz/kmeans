@@ -97,8 +97,8 @@ inline void __cudaCheckError( const char *file, const int line )
 const unsigned int window_width = 800;
 const unsigned int window_height = 800;
 
-const unsigned int width  = 100;
-const unsigned int height = 100;
+const unsigned int width  = 200;
+const unsigned int height = 200;
 
 // vbo variables
 GLuint vbo;
@@ -197,7 +197,8 @@ void findNearestClusterAndUpdateMembership( int numClusters, 	/* no. clusters */
 											 int numObjs, 		/* no. objects */
 											 float3 *objects, 	/* [numClusters] */
 											 float3 *clusters, 	/* [numClusters] */
-											 int *membership 	/* [numObjs] */
+											 int *membership, 	/* [numObjs] */
+											 int *delta
 										 )
 {
 	unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
@@ -218,7 +219,14 @@ void findNearestClusterAndUpdateMembership( int numClusters, 	/* no. clusters */
 				index = i;
 			}
 		}
+
+		if  (membership[objectId] != index) {
+			atomicAdd(delta, 1);
+		}
+
 		membership[objectId] = index;
+
+
     }
 }
 
@@ -254,8 +262,9 @@ void calculateNewClustersPositions( int numClusters, 	/* no. clusters */
 
 float3 *deviceObjects;
 float3 *deviceClusters;
-
+int *deviceMembership;
 int *membership = NULL;
+int *numberOfPointsThatChangeCluster;
 #define CLUSTER_COUNT 5
 #define OBJECTS_CLUSTER_CHANGE_THRESHOLD 0.1
 /*----< seq_kmeans() >-------------------------------------------------------*/
@@ -269,24 +278,19 @@ void kmeans(float3 *objects, /* in: [numObjs] */
 {
 	static int initialized;
     int i, loop=0;
-    float delta; /* % of objects change their clusters */
 
     if (!initialized) {
         //printf("/* pick first numClusters elements of objects[] as initial cluster centers*/\n");
-        for (i=0; i<numClusters; i++)
-    		clusters[i] = objects[i];
+
 
         //printf("/* initialize membership[] */\n");
         for (i=0; i<numObjs; i++) membership[i] = -1;
-
-    	CudaSafeCall( cudaMalloc(&deviceObjects, MESH_SIZE*sizeof(float3)));
+        CudaSafeCall( cudaMallocHost(&numberOfPointsThatChangeCluster, sizeof(int)));
     	CudaSafeCall( cudaMalloc(&deviceClusters, CLUSTER_COUNT*sizeof(float3)));
-    	CudaSafeCall( cudaMemcpy(deviceObjects, objects, MESH_SIZE*sizeof(float3), cudaMemcpyHostToDevice));
+
 		initialized = 1;
 		printf("Initialized:\n");
     }
-
-    CudaSafeCall( cudaMemcpy(deviceObjects, objects, MESH_SIZE*sizeof(float3), cudaMemcpyHostToDevice));
 
 	int numClusterBlocks, numThreadsPerClusterBlock, clusterBlockSharedDataSize;
 	numClusterBlocks = width;
@@ -294,21 +298,19 @@ void kmeans(float3 *objects, /* in: [numObjs] */
 	clusterBlockSharedDataSize = 1;
 
     do {
-        delta = 0.0;
+        *numberOfPointsThatChangeCluster = 0;
 
         findNearestClusterAndUpdateMembership
         	<<<numClusterBlocks, numThreadsPerClusterBlock, clusterBlockSharedDataSize >>>
-        	(numClusters, numObjs, deviceObjects, deviceClusters, membership);
+        	(numClusters, numObjs, objects, deviceClusters, membership, numberOfPointsThatChangeCluster);
         CudaCheckError();
         calculateNewClustersPositions
         	<<<numClusters, 1, 1 >>>
-        	(numClusters, numObjs, deviceObjects, deviceClusters, membership);
-        CudaCheckError();
+        	(numClusters, numObjs, objects, deviceClusters, membership);
 
-        delta /= numObjs;
-    } while (delta > threshold && loop++ < 50);
 
-    //CudaSafeCall( cudaMemcpy(membership, deviceMembership, MESH_SIZE*sizeof(int), cudaMemcpyDeviceToHost));
+    } while (*numberOfPointsThatChangeCluster/(float)numObjs > threshold && loop++ < 500);
+
 
     *loop_iterations = loop + 1;
 }
@@ -346,7 +348,7 @@ int main(int argc, char **argv)
 	pArgc = &argc;
 	pArgv = argv;
 
-	dptr = new float3[MESH_SIZE];
+	CudaSafeCall(cudaMallocHost(&dptr, MESH_SIZE*sizeof(float3)));
 
 	printf("starting...\n");
 

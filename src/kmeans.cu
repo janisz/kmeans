@@ -256,8 +256,10 @@ void prepare_positions(float3 *pos, float time)
 
 	    // calculate simple sine wave pattern
 	    float freq = 4.0f;
-	    float w = sinf(u*freq+time) * sinf(v*freq+time);
-
+	    //float w = sinf(u*freq+time) * cosf(v*freq+time);
+	    //float w = sinf(u*freq+time) * sinf(v*freq+time);
+	    //float w = sinf(freq*sqrtf(u*u + v*v)+time);
+	    float w = (u*u-v*v) * sinf(u+time);
 		pos[index] = make_float3(u, v, w);
 	}
 }

@@ -97,16 +97,10 @@ inline void __cudaCheckError( const char *file, const int line )
 const unsigned int window_width = 800;
 const unsigned int window_height = 800;
 
-const unsigned int width  = 512;
-const unsigned int height = 512;
+const unsigned int width  = 256;
+const unsigned int height = 256;
 
-// vbo variables
-GLuint vbo;
-struct cudaGraphicsResource *cuda_vbo_resource;
-void *d_vbo_buffer = NULL;
 
-//Table containing velocity of all particles. It is pointer to device memory
-float2 *speed = NULL;
 float3 *dptr = NULL;
 
 // mouse controls
@@ -193,10 +187,10 @@ float euclidDistance(const float3 coord1, const float3 coord2)
 
 /*----< find_nearest_cluster() >---------------------------------------------*/
 __global__
-void findNearestClusterAndUpdateMembership( int numClusters, 	/* no. clusters */
+void findNearestClusterAndUpdateMembership(const int numClusters, 	/* no. clusters */
 											 int numObjs, 		/* no. objects */
 											 float3 *objects, 	/* [numClusters] */
-											 float3 *clusters, 	/* [numClusters] */
+											 float3 *clustersPositions, 	/* [numClusters] */
 											 int *membership, 	/* [numObjs] */
 											 int *delta
 										 )
@@ -204,15 +198,24 @@ void findNearestClusterAndUpdateMembership( int numClusters, 	/* no. clusters */
 	unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
 	unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
 	unsigned int objectId = y*width+x;
+
+	extern __shared__ float3 clusters[];
+	if (threadIdx.x < numClusters)
+	{
+		clusters[threadIdx.x] = clustersPositions[threadIdx.x];
+	}
+	__syncthreads();
+
     if (objectId < numObjs) {
     	int index = 0;
 		float dist, min_dist;
+		float3 position = objects[objectId];
 
 		/* find the cluster id that has min distance to object */
-		min_dist = euclidDistance(objects[objectId], clusters[0]);
+		min_dist = euclidDistance(position, clusters[0]);
 
 		for (int i=1; i<numClusters; i++) {
-			dist = euclidDistance(objects[objectId], clusters[i]);
+			dist = euclidDistance(position, clusters[i]);
 			/* no need square root */
 			if (dist < min_dist) { /* find the min and its array index */
 				min_dist = dist;
@@ -220,14 +223,10 @@ void findNearestClusterAndUpdateMembership( int numClusters, 	/* no. clusters */
 			}
 		}
 
-		if  (membership[objectId] != index) {
-			atomicAdd(delta, 1);
-		}
 
 		membership[objectId] = index;
-
-
     }
+
 }
 
 __global__
@@ -241,7 +240,8 @@ void calculateNewClustersPositions( int numClusters, 	/* no. clusters */
 	unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
 	unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
 	unsigned int clusterId = y*width+x;
-    if (clusterId < numClusters) {
+
+	if (clusterId < numClusters) {
     	float3 position = make_float3(0, 0, 0);
     	int objectsInCluster = 0;
 
@@ -278,7 +278,7 @@ void kmeans(float3 *objects, /* in: [numObjs] */
 {
 	static int initialized;
     int loop=0;
-    if (initialized > 10) exit(0);
+    if (initialized > 100) exit(0);
     if (!initialized) {
         //printf("/* pick first numClusters elements of objects[] as initial cluster centers*/\n");
     	float3 clusters[CLUSTER_COUNT];
@@ -293,6 +293,7 @@ void kmeans(float3 *objects, /* in: [numObjs] */
     }
     initialized++;
 
+
 	dim3 block(32, 32, 1);
 	dim3 grid(width / block.x, height / block.y, 1);
 
@@ -300,13 +301,13 @@ void kmeans(float3 *objects, /* in: [numObjs] */
         *numberOfPointsThatChangeCluster = 0;
 
         findNearestClusterAndUpdateMembership
-        	<<< grid, block >>>
+        	<<< grid, block, numClusters*sizeof(float3) >>>
         	(numClusters, numObjs, objects, deviceClusters, membership, numberOfPointsThatChangeCluster);
         CudaCheckError();
         calculateNewClustersPositions
         	<<< grid, block >>>
         	(numClusters, numObjs, objects, deviceClusters, membership);
-
+        CudaCheckError();
 
     } while (*numberOfPointsThatChangeCluster/(float)numObjs > threshold && loop++ < 500);
 

@@ -97,8 +97,8 @@ inline void __cudaCheckError( const char *file, const int line )
 const unsigned int window_width = 800;
 const unsigned int window_height = 800;
 
-const unsigned int width  = 200;
-const unsigned int height = 200;
+const unsigned int width  = 512;
+const unsigned int height = 512;
 
 // vbo variables
 GLuint vbo;
@@ -277,35 +277,34 @@ void kmeans(float3 *objects, /* in: [numObjs] */
                    int *loop_iterations)
 {
 	static int initialized;
-    int i, loop=0;
-
+    int loop=0;
+    if (initialized > 10) exit(0);
     if (!initialized) {
         //printf("/* pick first numClusters elements of objects[] as initial cluster centers*/\n");
-
-
+    	float3 clusters[CLUSTER_COUNT];
+    	for (int i=0;i<CLUSTER_COUNT;i++) clusters[i] = objects[i];
         //printf("/* initialize membership[] */\n");
-        for (i=0; i<numObjs; i++) membership[i] = -1;
+        for (int i=0; i<numObjs; i++) membership[i] = -1;
         CudaSafeCall( cudaMallocHost(&numberOfPointsThatChangeCluster, sizeof(int)));
     	CudaSafeCall( cudaMalloc(&deviceClusters, CLUSTER_COUNT*sizeof(float3)));
+    	CudaSafeCall( cudaMemcpy(deviceClusters, clusters, CLUSTER_COUNT*sizeof(float3), cudaMemcpyHostToDevice));
 
-		initialized = 1;
 		printf("Initialized:\n");
     }
+    initialized++;
 
-	int numClusterBlocks, numThreadsPerClusterBlock, clusterBlockSharedDataSize;
-	numClusterBlocks = width;
-	numThreadsPerClusterBlock = height;
-	clusterBlockSharedDataSize = 1;
+	dim3 block(32, 32, 1);
+	dim3 grid(width / block.x, height / block.y, 1);
 
     do {
         *numberOfPointsThatChangeCluster = 0;
 
         findNearestClusterAndUpdateMembership
-        	<<<numClusterBlocks, numThreadsPerClusterBlock, clusterBlockSharedDataSize >>>
+        	<<< grid, block >>>
         	(numClusters, numObjs, objects, deviceClusters, membership, numberOfPointsThatChangeCluster);
         CudaCheckError();
         calculateNewClustersPositions
-        	<<<numClusters, 1, 1 >>>
+        	<<< grid, block >>>
         	(numClusters, numObjs, objects, deviceClusters, membership);
 
 

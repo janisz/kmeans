@@ -192,10 +192,12 @@ void findNearestClusterAndUpdateMembership(  float3 *objects,
 	unsigned int objectId = y*width+x;
 
 	__shared__ float3 clusters[CLUSTER_COUNT];
+	__shared__ float3 newClusters[CLUSTER_COUNT];
 	__shared__ int clusterSize[CLUSTER_COUNT];
 	__shared__ int changedClusters[1];
 	if (threadIdx.x < CLUSTER_COUNT)
 	{
+		newClusters[threadIdx.x] = make_float3(0, 0, 0);
 		clusters[threadIdx.x] = clustersPositions[threadIdx.x];
 		clusterSize[threadIdx.x] = 0;
 	}
@@ -219,9 +221,16 @@ void findNearestClusterAndUpdateMembership(  float3 *objects,
 			}
 		}
 
-
-		membership[objectId] = index;
+		atomicAdd(&clusterSize[index], 1);
+		atomicAdd((float*)newClusters +index 				 	, position.x);
+		atomicAdd((float*)newClusters + index +   sizeof(float)	, position.y);
+		atomicAdd((float*)newClusters + index + 2*sizeof(float)	, position.z);
+		if (membership[objectId] != index) {
+			atomicAdd(changedClusters, 1);
+			membership[objectId] = index;
+		}
     }
+    __syncthreads();
 
 }
 

@@ -193,11 +193,17 @@ void findNearestClusterAndUpdateMembership(  float3 *objects,
 	unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
 	unsigned int objectId = y*width+x;
 
-	extern __shared__ float3 clusters[];
+	__shared__ float3 clusters[CLUSTER_COUNT];
+	__shared__ float3 newClusters[CLUSTER_COUNT];
+	__shared__ int clusterSize[CLUSTER_COUNT];
+	__shared__ int changedClusters[1];
 	if (threadIdx.x < CLUSTER_COUNT)
 	{
+		newClusters[threadIdx.x] = make_float3(0, 0, 0);
 		clusters[threadIdx.x] = clustersPositions[threadIdx.x];
+		clusterSize[threadIdx.x] = 0;
 	}
+	changedClusters[0] = 0;
 	__syncthreads();
 
     if (objectId < MESH_SIZE) {
@@ -216,18 +222,15 @@ void findNearestClusterAndUpdateMembership(  float3 *objects,
 				index = i;
 			}
 		}
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
 
-
-		membership[objectId] = index;
-    }
-=======
-=======
->>>>>>> Stashed changes
+		atomicAdd(&clusterSize[index], 1);
+		atomicAdd((float*)newClusters +index 				 	, position.x);
+		atomicAdd((float*)newClusters + index +   sizeof(float)	, position.y);
+		atomicAdd((float*)newClusters + index + 2*sizeof(float)	, position.z);
 		if (membership[objectId] != index) {
 			membership[objectId] = index;
 			atomicAdd(changedClusters, 1);
+			membership[objectId] = index;
 		}
 
 		atomicAdd(&clusterSize[index], 1);
@@ -243,32 +246,11 @@ void findNearestClusterAndUpdateMembership(  float3 *objects,
     {
     	for (int i=0;i<CLUSTER_COUNT;i++) {
     		clustersPositions[i] = make_float3(0, 0, 0);
-<<<<<<< Updated upstream
 		}
     }
 
     __syncthreads();
->>>>>>> Stashed changes
 
-    if ( threadIdx.x == 0 && threadIdx.y == 0)
-    {
-    	for (int i=0;i<CLUSTER_COUNT;i++) {
-    		atomicAdd(&newClusterSize[i], clusterSize[i]);
-
-			atomicAdd(&(clustersPositions[i].x), newClusters[i].x);
-			atomicAdd(&(clustersPositions[i].y), newClusters[i].y);
-			atomicAdd(&(clustersPositions[i].z), newClusters[i].z);
-=======
->>>>>>> Stashed changes
-		}
-
-    	atomicAdd(delta, changedClusters[0]);
-    }
-
-    __syncthreads();
-
-<<<<<<< Updated upstream
-=======
     if ( threadIdx.x == 0 && threadIdx.y == 0)
     {
     	for (int i=0;i<CLUSTER_COUNT;i++) {
@@ -284,7 +266,6 @@ void findNearestClusterAndUpdateMembership(  float3 *objects,
 
     __syncthreads();
 
->>>>>>> Stashed changes
     if (objectId == 0)
     {
     	for (int i=0;i<CLUSTER_COUNT;i++) {
@@ -353,18 +334,8 @@ void kmeans(int *membership, int *loop_iterations)
         *numberOfPointsThatChangeCluster = 0;
 
         findNearestClusterAndUpdateMembership
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-        	<<< grid, block, CLUSTER_COUNT*sizeof(float3) >>>
-        	(dptr, deviceClusters, membership, numberOfPointsThatChangeCluster);
-=======
         	<<< grid, block >>>
         	(dptr, deviceClusters, membership, numberOfPointsThatChangeCluster, deviceNewClusterSize);
->>>>>>> Stashed changes
-=======
-        	<<< grid, block >>>
-        	(dptr, deviceClusters, membership, numberOfPointsThatChangeCluster, deviceNewClusterSize);
->>>>>>> Stashed changes
         CudaCheckError();
         calculateNewClustersPositions
         	<<< grid, block >>>

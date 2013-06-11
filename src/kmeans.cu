@@ -191,11 +191,15 @@ void findNearestClusterAndUpdateMembership(  float3 *objects,
 	unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
 	unsigned int objectId = y*width+x;
 
-	extern __shared__ float3 clusters[];
+	__shared__ float3 clusters[CLUSTER_COUNT];
+	__shared__ int clusterSize[CLUSTER_COUNT];
+	__shared__ int changedClusters[1];
 	if (threadIdx.x < CLUSTER_COUNT)
 	{
 		clusters[threadIdx.x] = clustersPositions[threadIdx.x];
+		clusterSize[threadIdx.x] = 0;
 	}
+	changedClusters[0] = 0;
 	__syncthreads();
 
     if (objectId < MESH_SIZE) {
@@ -277,7 +281,7 @@ void kmeans(int *membership, int *loop_iterations)
         *numberOfPointsThatChangeCluster = 0;
 
         findNearestClusterAndUpdateMembership
-        	<<< grid, block, CLUSTER_COUNT*sizeof(float3) >>>
+        	<<< grid, block >>>
         	(dptr, deviceClusters, membership, numberOfPointsThatChangeCluster);
         CudaCheckError();
         calculateNewClustersPositions

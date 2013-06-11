@@ -97,8 +97,8 @@ inline void __cudaCheckError( const char *file, const int line )
 const unsigned int window_width = 800;
 const unsigned int window_height = 800;
 
-const unsigned int width = 20;
-const unsigned int height = 20;
+const unsigned int width  = 100;
+const unsigned int height = 100;
 
 // vbo variables
 GLuint vbo;
@@ -254,7 +254,7 @@ void calculateNewClustersPositions( int numClusters, 	/* no. clusters */
 
 float3 *deviceObjects;
 float3 *deviceClusters;
-int *deviceMembership;
+
 int *membership = NULL;
 #define CLUSTER_COUNT 5
 #define OBJECTS_CLUSTER_CHANGE_THRESHOLD 0.1
@@ -270,33 +270,23 @@ void kmeans(float3 *objects, /* in: [numObjs] */
 	static int initialized;
     int i, loop=0;
     float delta; /* % of objects change their clusters */
-    float3 clusters[numClusters];
-
-    //printf("/* pick first numClusters elements of objects[] as initial cluster centers*/\n");
-    for (i=0; i<numClusters; i++)
-		clusters[i] = objects[i];
-
-    //printf("/* initialize membership[] */\n");
-    for (i=0; i<numObjs; i++) membership[i] = -1;
-
 
     if (!initialized) {
+        //printf("/* pick first numClusters elements of objects[] as initial cluster centers*/\n");
+        for (i=0; i<numClusters; i++)
+    		clusters[i] = objects[i];
+
+        //printf("/* initialize membership[] */\n");
+        for (i=0; i<numObjs; i++) membership[i] = -1;
+
     	CudaSafeCall( cudaMalloc(&deviceObjects, MESH_SIZE*sizeof(float3)));
     	CudaSafeCall( cudaMalloc(&deviceClusters, CLUSTER_COUNT*sizeof(float3)));
-    	CudaSafeCall( cudaMalloc(&deviceMembership, MESH_SIZE*sizeof(int)));
-
-    	CudaSafeCall( cudaMemcpy(deviceMembership, membership, MESH_SIZE*sizeof(int), cudaMemcpyHostToDevice));
     	CudaSafeCall( cudaMemcpy(deviceObjects, objects, MESH_SIZE*sizeof(float3), cudaMemcpyHostToDevice));
 		initialized = 1;
 		printf("Initialized:\n");
     }
 
     CudaSafeCall( cudaMemcpy(deviceObjects, objects, MESH_SIZE*sizeof(float3), cudaMemcpyHostToDevice));
-
-    printf("Objects\nX\t\tY\t\tZ\n");
-    for (int i=0;i<CLUSTER_COUNT;i++)
-    	printf("%f,\t%f,\t%f\n", clusters[i].x, clusters[i].y, clusters[i].z);
-
 
 	int numClusterBlocks, numThreadsPerClusterBlock, clusterBlockSharedDataSize;
 	numClusterBlocks = width;
@@ -308,25 +298,18 @@ void kmeans(float3 *objects, /* in: [numObjs] */
 
         findNearestClusterAndUpdateMembership
         	<<<numClusterBlocks, numThreadsPerClusterBlock, clusterBlockSharedDataSize >>>
-        	(numClusters, numObjs, deviceObjects, deviceClusters, deviceMembership);
+        	(numClusters, numObjs, deviceObjects, deviceClusters, membership);
         CudaCheckError();
         calculateNewClustersPositions
         	<<<numClusters, 1, 1 >>>
-        	(numClusters, numObjs, deviceObjects, deviceClusters, deviceMembership);
+        	(numClusters, numObjs, deviceObjects, deviceClusters, membership);
         CudaCheckError();
 
         delta /= numObjs;
-    } while (delta > threshold && loop++ < 500);
+    } while (delta > threshold && loop++ < 50);
 
-    CudaSafeCall( cudaMemcpy(membership, deviceMembership, MESH_SIZE*sizeof(int), cudaMemcpyDeviceToHost));
-    CudaSafeCall( cudaMemcpy(clusters, deviceClusters, sizeof(clusters), cudaMemcpyDeviceToHost));
+    //CudaSafeCall( cudaMemcpy(membership, deviceMembership, MESH_SIZE*sizeof(int), cudaMemcpyDeviceToHost));
 
-    printf("Clusters\nX\t\tY\t\tZ\n");
-    for (int i=0;i<sizeof(clusters)/sizeof(float3);i++)
-    	printf("%f,\t%f,\t%f\n", clusters[i].x, clusters[i].y, clusters[i].z);
-    printf("Objects\nX\t\tY\t\tZ\n");
-//    for (int i=0;i<MESH_SIZE;i++)
-//        	printf("%f,\t%f,\t%f\n", objects[i].x, objects[i].y, objects[i].z);
     *loop_iterations = loop + 1;
 }
 
@@ -350,8 +333,8 @@ void prepare_positions(float3 *pos, float time)
 	    float freq = 4.0f;
 	    //float w = sinf(u*freq+time) * cosf(v*freq+time);
 	    //float w = sinf(u*freq+time) * sinf(v*freq+time);
-	    //float w = sinf(freq*sqrtf(u*u + v*v)+time);
-	    float w = (u*u-v*v) * sinf(u+time);
+	    float w = sinf(freq*sqrtf(u*u + v*v)+time);
+	    //float w = (u*u-v*v) * sinf(u+time);
 		pos[index] = make_float3(u, v, w);
 	}
 }
@@ -438,7 +421,7 @@ void runKmeans()
 {
 	//launch_kernel(dptr, width, height, speed);
 	if (membership == NULL) {
-		membership = new int[MESH_SIZE];
+		CudaSafeCall(cudaMallocHost(&membership, MESH_SIZE*sizeof(int)));
 	}
 
 	static double t;

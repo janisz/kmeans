@@ -34,6 +34,7 @@
 #include <helper_cuda_gl.h> // helper functions for CUDA/GL interop
 
 #include <vector_types.h>
+#include <limits.h>
 
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
@@ -133,8 +134,8 @@ inline __host__ __device__ float distance(float3 pt1, float3 pt2)
 
 /*-----------------------------------------------------------------------------------------------------*/
 
-__inline static
-float euclidDistance(float3 coord1, float3 coord2)
+__host__ __device__ inline
+float euclidDistance(const float3 coord1, const float3 coord2)
 {
     float ans=0.0;
 
@@ -146,27 +147,32 @@ float euclidDistance(float3 coord1, float3 coord2)
 }
 
 /*----< find_nearest_cluster() >---------------------------------------------*/
-__inline static
-int findNearestCluster(int numClusters, /* no. clusters */
-                         float3 object, /* [numCoords] */
-                         float3 *clusters) /* [numClusters][numCoords] */
+__golobal__
+void findNearestCluster( int numClusters, 	/* no. clusters */
+						 int numObjs, 		/* no. objects */
+                         float3 *objects, 	/* [numClusters] */
+                         float3 *clusters, 	/* [numClusters] */
+                         int *membership, 	/* [numObjs] */
+					 )
 {
-    int index = 0;
-    float dist, min_dist;
+    int objectId = blockDim.x * blockIdx.x + threadIdx.x;
+    if (objectId < numObjs) {
+    	int index = 0;
+		float dist, min_dist;
 
-    /* find the cluster id that has min distance to object */
-    index = 0;
-    min_dist = euclidDistance(object, clusters[0]);
+		/* find the cluster id that has min distance to object */
+		min_dist = euclidDistance(object, clusters[0]);
 
-    for (int i=1; i<numClusters; i++) {
-        dist = euclidDistance(object, clusters[i]);
-        /* no need square root */
-        if (dist < min_dist) { /* find the min and its array index */
-            min_dist = dist;
-            index = i;
-        }
+		for (int i=1; i<numClusters; i++) {
+			dist = euclidDistance(objects[objectId], clusters[i]);
+			/* no need square root */
+			if (dist < min_dist) { /* find the min and its array index */
+				min_dist = dist;
+				index = i;
+			}
+		}
+		membership[objectId] = index;
     }
-    return index;
 }
 
 /*----< seq_kmeans() >-------------------------------------------------------*/

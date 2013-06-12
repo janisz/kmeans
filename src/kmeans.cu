@@ -49,45 +49,45 @@
 #define CUDA_ERROR_CHECK
 
 #define CudaSafeCall( err ) __cudaSafeCall( err, __FILE__, __LINE__ )
-#define CudaCheckError()    __cudaCheckError( __FILE__, __LINE__ )
+#define CudaCheckError() __cudaCheckError( __FILE__, __LINE__ )
 
 inline void __cudaSafeCall( cudaError err, const char *file, const int line )
 {
 #ifdef CUDA_ERROR_CHECK
-    if ( cudaSuccess != err )
-    {
-        fprintf( stderr, "cudaSafeCall() failed at %s:%i : %s\n",
-                 file, line, cudaGetErrorString( err ) );
-        exit( -1 );
-    }
+	if ( cudaSuccess != err )
+	{
+		fprintf( stderr, "cudaSafeCall() failed at %s:%i : %s\n",
+				file, line, cudaGetErrorString( err ) );
+		exit( -1 );
+	}
 #endif
 
-    return;
+	return;
 }
 
 inline void __cudaCheckError( const char *file, const int line )
 {
 #ifdef CUDA_ERROR_CHECK
-    cudaError err = cudaGetLastError();
-    if ( cudaSuccess != err )
-    {
-        fprintf( stderr, "cudaCheckError() failed at %s:%i : %s\n",
-                 file, line, cudaGetErrorString( err ) );
-        exit( -1 );
-    }
+	cudaError err = cudaGetLastError();
+	if ( cudaSuccess != err )
+	{
+		fprintf( stderr, "cudaCheckError() failed at %s:%i : %s\n",
+				file, line, cudaGetErrorString( err ) );
+		exit( -1 );
+	}
 
-    // More careful checking. However, this will affect performance.
-    // Comment away if needed.
-    err = cudaDeviceSynchronize();
-    if( cudaSuccess != err )
-    {
-        fprintf( stderr, "cudaCheckError() with sync failed at %s:%i : %s\n",
-                 file, line, cudaGetErrorString( err ) );
-        exit( -1 );
-    }
+	// More careful checking. However, this will affect performance.
+	// Comment away if needed.
+	err = cudaDeviceSynchronize();
+	if( cudaSuccess != err )
+	{
+		fprintf( stderr, "cudaCheckError() with sync failed at %s:%i : %s\n",
+				file, line, cudaGetErrorString( err ) );
+		exit( -1 );
+	}
 #endif
 
-    return;
+	return;
 }
 
 float3 *dptr = NULL;
@@ -141,8 +141,8 @@ void checkResultCuda(int argc, char **argv, const GLuint &vbo);
 const unsigned int window_width = 800;
 const unsigned int window_height = 800;
 
-const unsigned int width  = 256;
-const unsigned int height = 256;
+const unsigned int width = 1024;
+const unsigned int height = 1024;
 
 float3 *deviceObjects;
 float3 *deviceClusters;
@@ -181,31 +181,28 @@ inline __host__ __device__ float sqDistance(float3 pt1, float3 pt2)
 
 
 __global__
-void findNearestClusterAndUpdateMembership(  float3 *objects,
-											 float3 *clustersPositions,
-											 int *membership,
-											 int *delta
-										 )
+void findNearestClusterAndUpdateMembership( float3 *objects,
+		float3 *clustersPositions,
+		int *membership,
+		int *delta
+)
 {
 	unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
 	unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
 	unsigned int objectId = y*width+x;
+	unsigned int tid = threadIdx.x + threadIdx.y;
+
 
 	__shared__ float3 clusters[CLUSTER_COUNT];
-	__shared__ float3 newClusters[CLUSTER_COUNT];
-	__shared__ int clusterSize[CLUSTER_COUNT];
-	__shared__ int changedClusters[1];
-	if (threadIdx.x < CLUSTER_COUNT)
+	if (tid < CLUSTER_COUNT)
 	{
-		newClusters[threadIdx.x] = make_float3(0, 0, 0);
-		clusters[threadIdx.x] = clustersPositions[threadIdx.x];
-		clusterSize[threadIdx.x] = 0;
+		clusters[tid] = clustersPositions[tid];
 	}
-	changedClusters[0] = 0;
+
 	__syncthreads();
 
-    if (objectId < MESH_SIZE) {
-    	int index = 0;
+	if (objectId < MESH_SIZE) {
+		int index = 0;
 		float dist, min_dist;
 		float3 position = objects[objectId];
 
@@ -221,32 +218,25 @@ void findNearestClusterAndUpdateMembership(  float3 *objects,
 			}
 		}
 
-		atomicAdd(&clusterSize[index], 1);
-		atomicAdd((float*)newClusters +index 				 	, position.x);
-		atomicAdd((float*)newClusters + index +   sizeof(float)	, position.y);
-		atomicAdd((float*)newClusters + index + 2*sizeof(float)	, position.z);
-		if (membership[objectId] != index) {
-			atomicAdd(changedClusters, 1);
-			membership[objectId] = index;
-		}
-    }
-    __syncthreads();
+
+		membership[objectId] = index;
+	}
 
 }
 
 __global__
-void calculateNewClustersPositions( float3 *objects, 	/* [numClusters] */
-									float3 *clusters, 	/* [numClusters] */
-									int *membership 	/* [numObjs] */
-								 )
+void calculateNewClustersPositions( float3 *objects, /* [numClusters] */
+		float3 *clusters, /* [numClusters] */
+		int *membership /* [numObjs] */
+)
 {
 	unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
 	unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
 	unsigned int clusterId = y*width+x;
 
 	if (clusterId < CLUSTER_COUNT) {
-    	float3 position = make_float3(0, 0, 0);
-    	int objectsInCluster = 0;
+		float3 position = make_float3(0, 0, 0);
+		int objectsInCluster = 0;
 
 		for (int i=0; i<MESH_SIZE; i++) {
 			if (membership[i] == clusterId) {
@@ -260,48 +250,48 @@ void calculateNewClustersPositions( float3 *objects, 	/* [numClusters] */
 		}
 
 		clusters[clusterId] = position;
-    }
+	}
 }
 
 void kmeans(int *membership, int *loop_iterations)
 {
 	static int initialized;
-    int loop=0;
-    if (initialized > 100) exit(0);
-    if (!initialized) {
-        //printf("/* pick first numClusters elements of objects[] as initial cluster centers*/\n");
-    	float3 clusters[CLUSTER_COUNT];
-    	for (int i=0;i<CLUSTER_COUNT;i++) clusters[i] = dptr[i];
-        //printf("/* initialize membership[] */\n");
-        for (int i=0; i<MESH_SIZE; i++) membership[i] = -1;
-        CudaSafeCall( cudaMallocHost(&numberOfPointsThatChangeCluster, sizeof(int)));
-    	CudaSafeCall( cudaMalloc(&deviceClusters, CLUSTER_COUNT*sizeof(float3)));
-    	CudaSafeCall( cudaMemcpy(deviceClusters, clusters, CLUSTER_COUNT*sizeof(float3), cudaMemcpyHostToDevice));
-
+	int loop=0;
+	//if (initialized > 100) exit(0);
+	if (!initialized) {
+		//printf("/* pick first numClusters elements of objects[] as initial cluster centers*/\n");
+		float3 clusters[CLUSTER_COUNT];
+		for (int i=0;i<CLUSTER_COUNT;i++) clusters[i] = dptr[i];
+		//printf("/* initialize membership[] */\n");
+		for (int i=0; i<MESH_SIZE; i++) membership[i] = -1;
+		CudaSafeCall( cudaMallocHost(&numberOfPointsThatChangeCluster, sizeof(int)));
+		CudaSafeCall( cudaMalloc(&deviceClusters, CLUSTER_COUNT*sizeof(float3)));
+		CudaSafeCall( cudaMemcpy(deviceClusters, clusters, CLUSTER_COUNT*sizeof(float3), cudaMemcpyHostToDevice));
+		initialized++;
 		printf("Initialized:\n");
-    }
-    initialized++;
+	}
 
 
-	dim3 block(32, 32, 1);
+
+	dim3 block(4, 4, 1);
 	dim3 grid(width / block.x, height / block.y, 1);
 
-    do {
-        *numberOfPointsThatChangeCluster = 0;
+	do {
+		*numberOfPointsThatChangeCluster = 0;
 
-        findNearestClusterAndUpdateMembership
-        	<<< grid, block >>>
-        	(dptr, deviceClusters, membership, numberOfPointsThatChangeCluster);
-        CudaCheckError();
-        calculateNewClustersPositions
-        	<<< grid, block >>>
-        	(dptr, deviceClusters, membership);
-        CudaCheckError();
+		findNearestClusterAndUpdateMembership
+		<<< grid, block >>>
+		(dptr, deviceClusters, membership, numberOfPointsThatChangeCluster);
+		CudaCheckError();
+		calculateNewClustersPositions
+		<<< grid, block >>>
+		(dptr, deviceClusters, membership);
+		CudaCheckError();
 
-    } while (*numberOfPointsThatChangeCluster/(float)MESH_SIZE > OBJECTS_CLUSTER_CHANGE_THRESHOLD && loop++ < 500);
+	} while (*numberOfPointsThatChangeCluster/(float)MESH_SIZE > OBJECTS_CLUSTER_CHANGE_THRESHOLD && loop++ < 500);
 
 
-    *loop_iterations = loop + 1;
+	*loop_iterations = loop + 1;
 }
 
 /*-----------------------------------------------------------------------------------------------------*/
@@ -317,15 +307,15 @@ void prepare_positions(float time)
 
 		float u = (index / width) / (float) width;
 		float v = (index % width) / (float) height;
-	    u = u*2-1;
-	    v = v*2-1;
+		u = u*2-1;
+		v = v*2-1;
 
-	    // calculate simple sine wave pattern
-	    float freq = 4.0f;
-	    //float w = sinf(u*freq+time) * cosf(v*freq+time);
-	    //float w = sinf(u*freq+time) * sinf(v*freq+time);
-	    float w = sinf(freq*sqrtf(u*u + v*v)+time);
-	    //float w = (u*u-v*v) * sinf(u+time);
+		// calculate simple sine wave pattern
+		float freq = 4.0f;
+		//float w = sinf(u*freq+time) * cosf(v*freq+time);
+		//float w = sinf(u*freq+time) * sinf(v*freq+time);
+		float w = sinf(freq*sqrtf(u*u + v*v)+time);
+		//float w = (u*u-v*v) * sinf(u+time);
 		dptr[index] = make_float3(u, v, w);
 	}
 }
@@ -459,11 +449,11 @@ void setGLColorForCluster(int index)
 	if (membership[index] == 2)
 		glColor3f( 0, 0.5, 1 );
 	if (membership[index] == 3)
-			glColor3f( 0, 1, 1 );
+		glColor3f( 0, 1, 1 );
 	if (membership[index] == 4)
-			glColor3f( 1, 1, 0 );
+		glColor3f( 1, 1, 0 );
 	if (membership[index] == 5)
-			glColor3f( 0.5, 1, 0 );
+		glColor3f( 0.5, 1, 0 );
 }
 
 void display()
@@ -515,12 +505,12 @@ void cleanup()
 ////////////////////////////////////////////////////////////////////////////////
 void keyboard(unsigned char key, int /*x*/, int /*y*/)
 {
-    switch (key)
-    {
-        case (27) :
-            exit(EXIT_SUCCESS);
-            break;
-    }
+	switch (key)
+	{
+	case (27) :
+            		exit(EXIT_SUCCESS);
+	break;
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -528,35 +518,35 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
 ////////////////////////////////////////////////////////////////////////////////
 void mouse(int button, int state, int x, int y)
 {
-    if (state == GLUT_DOWN)
-    {
-        mouse_buttons |= 1<<button;
-    }
-    else if (state == GLUT_UP)
-    {
-        mouse_buttons = 0;
-    }
+	if (state == GLUT_DOWN)
+	{
+		mouse_buttons |= 1<<button;
+	}
+	else if (state == GLUT_UP)
+	{
+		mouse_buttons = 0;
+	}
 
-    mouse_old_x = x;
-    mouse_old_y = y;
+	mouse_old_x = x;
+	mouse_old_y = y;
 }
 
 void motion(int x, int y)
 {
-    float dx, dy;
-    dx = (float)(x - mouse_old_x);
-    dy = (float)(y - mouse_old_y);
+	float dx, dy;
+	dx = (float)(x - mouse_old_x);
+	dy = (float)(y - mouse_old_y);
 
-    if (mouse_buttons & 1)
-    {
-        rotate_x += dy * 0.2f;
-        rotate_y += dx * 0.2f;
-    }
-    else if (mouse_buttons & 4)
-    {
-        translate_z += dy * 0.01f;
-    }
+	if (mouse_buttons & 1)
+	{
+		rotate_x += dy * 0.2f;
+		rotate_y += dx * 0.2f;
+	}
+	else if (mouse_buttons & 4)
+	{
+		translate_z += dy * 0.01f;
+	}
 
-    mouse_old_x = x;
-    mouse_old_y = y;
+	mouse_old_x = x;
+	mouse_old_y = y;
 }
